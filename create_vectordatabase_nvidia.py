@@ -5,6 +5,8 @@ from langchain_community.vectorstores import Chroma
 import argparse
 import os
 
+Hello
+
 CHROMA_PATH = "chroma"
 EMBED_MODEL = "nvidia/nv-embed-v1"
 
