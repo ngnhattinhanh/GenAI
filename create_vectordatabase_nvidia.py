@@ -2,9 +2,7 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_nvidia_ai_endpoints import NVIDIAEmbeddings
 from langchain_community.vectorstores import Chroma
-from google.colab import userdata
 import argparse
-import tempfile
 import os
 
 CHROMA_PATH = "chroma"
