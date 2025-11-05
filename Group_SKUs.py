@@ -2,6 +2,9 @@ import pandas as pd
 import numpy as np
 from sentence_transformers import SentenceTransformer
 from sklearn.cluster import DBSCAN, HDBSCAN
+import os
+from langchain_nvidia_ai_endpoints import ChatNVIDIA
+from langchain.prompts import ChatPromptTemplate
 import faiss
 import json
 import re
@@ -102,6 +105,7 @@ class ProductVectorManager:
             result_list.append(product_info)
         return pd.DataFrame(result_list)
 
+    #Can custome
     def _get_text_for_embedding(self, product_row: pd.Series) -> str:
         name = self._clean_text(product_row.get('product_name', ''))
         desc = self._clean_text(product_row.get('short_description', ''))
@@ -129,14 +133,14 @@ class ProductVectorManager:
 
         # Encode in batches and ensure float32
         self.embeddings = embeddings = self.model.encode(
-            texts, 
-            show_progress_bar=True, 
+            texts,
+            show_progress_bar=True,
             batch_size=64
         ).astype('float32')
-        
-        faiss.normalize_L2(embeddings) # Normalize for Cosine/IP
 
-        # Clustering
+        faiss.normalize_L2(embeddings)  # Normalize for Cosine/IP
+
+        # ----------- CLUSTERING -----------
         if self.use_hdbscan:
             print("Using HDBSCAN for clustering...")
             clusterer = HDBSCAN(
@@ -147,20 +151,36 @@ class ProductVectorManager:
         else:
             print("Using DBSCAN for clustering...")
             dbscan = DBSCAN(
-                eps=self.eps_value, 
-                min_samples=self.min_samples, 
+                eps=self.eps_value,
+                min_samples=self.min_samples,
                 metric='cosine'
             )
             clusters = dbscan.fit_predict(embeddings)
 
         self.df['group_sku_id'] = clusters
         self.df.to_csv('result.csv', index=False)
-        
-        # Build FAISS index
+
+        # ----------- BUILD FAISS INDEX -----------
         d = embeddings.shape[1]
-        self.index = faiss.IndexFlatIP(d) # Use Inner Product (IP) because vectors are normalized
+        nlist = int(self.df['group_sku_id'].max() + 1)
+        print(f"Building FAISS IndexIVFFlat with nlist={nlist}...")
+
+        quantizer = faiss.IndexFlatIP(d)  # coarse quantizer for IVF
+        self.index = faiss.IndexIVFFlat(quantizer, d, nlist, faiss.METRIC_INNER_PRODUCT)
+
+        # Train before adding
+        if not self.index.is_trained:
+            print("Training FAISS index (coarse quantizer)...")
+            self.index.train(embeddings)
+            print("Training complete.")
+
+        # Add all embeddings to IVF index
         self.index.add(embeddings)
-        print(f"FAISS index built with {self.index.ntotal} vectors.")
+
+        # Config search behavior
+        self.index.nprobe = min(10, nlist)  # search in up to 10 clusters
+        print(f"FAISS IVF Index built with {self.index.ntotal} vectors (nprobe={self.index.nprobe}).")
+
 
     # ----------------- CHECK -----------------
     def _check_ready(self):
@@ -232,7 +252,20 @@ class ProductVectorManager:
     # ----------------- RAG PROMPT -----------------
     def generate_rag_prompt(self, user_question: str, k: int = 5) -> str:
         self._check_ready()
-        
+
+        PROMPT_TEMPLATE = """
+Based on the following context:
+
+--- Context ---
+{context}
+--- End Context ---
+
+Please answer the user's question in a friendly manner, using only the information from the context.
+
+Question: {question}
+
+Your Answer:
+"""     
         question_vector = self.model.encode([user_question]).astype('float32')
         faiss.normalize_L2(question_vector)
 
@@ -244,16 +277,8 @@ class ProductVectorManager:
             context_strings.append(self._get_text_for_embedding(product_row))
 
         context = "\n".join([f"- Related Product: {txt}" for txt in context_strings])
-        return f"""
-Based on the following context:
-
---- Context ---
-{context}
---- End Context ---
-
-Please answer the user's question in a friendly manner, using only the information from the context.
-
-Question: {user_question}
-
-Your Answer:
-"""
+        prompt = ChatPromptTemplate.from_template(PROMPT_TEMPLATE).format(
+            context=context,
+            question=user_question
+        )
+        return context, prompt
