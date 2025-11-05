@@ -1,7 +1,9 @@
-pandas
-numpy
-sentence-transformers
-scikit-learn
-faiss-cpu
-langchain_nvidia_ai_endpoints
-langchain
+numpy==1.26.4
+pandas==2.2.3
+scikit-learn==1.3.2
+sentence-transformers==2.2.2
+faiss-cpu==1.7.4
+langchain==0.3.13
+langchain_nvidia_ai_endpoints==0.3.0
+torch>=2.1.0
+transformers>=4.39.0
