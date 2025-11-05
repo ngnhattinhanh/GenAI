@@ -1,0 +1,7 @@
+pandas
+numpy
+sentence-transformers
+scikit-learn
+faiss-cpu
+langchain_nvidia_ai_endpoints
+langchain
